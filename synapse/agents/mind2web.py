@@ -34,7 +34,6 @@ def eval_traj_sample(task_id, args, sample):
     with open(os.path.join(args.memory_path, "exemplars.json"), "r") as f:
         memory_mapping = json.load(f)
 
-    element_acc = []
     action_f1 = []
     step_success = []
     success = []
@@ -61,6 +60,7 @@ def eval_traj_sample(task_id, args, sample):
     ]
     prev_actions = []
     prev_obs = []
+    element_acc = []
     for s, act_repr in zip(sample["actions"], sample["action_reprs"]):
         # target_obs, target_act = get_target_obs_and_act(s)
         _, target_act = get_target_obs_and_act(s)
@@ -70,7 +70,7 @@ def eval_traj_sample(task_id, args, sample):
         pos_candidates = s["pos_candidates"]
         pos_candidates = [c for c in pos_candidates if c["rank"] < args.top_k_elements]
         pos_ids = [c["backend_node_id"] for c in pos_candidates]
-        if len(pos_ids) == 0:
+        if not pos_ids:
             element_acc.append(0)
             action_f1.append(0)
             step_success.append(0)
@@ -86,31 +86,27 @@ def eval_traj_sample(task_id, args, sample):
         # Generate action with OpenAI api
         query = []
         for o, a in zip(prev_obs, prev_actions):
-            if len(query) == 0:
+            if not query:
                 query.append(
                     {
                         "role": "user",
-                        "content": f"Task: {sample['confirmed_task']}\nTrajectory:\n"
-                        + o,
+                        "content": f"Task: {sample['confirmed_task']}\nTrajectory:\n{o}",
                     }
                 )
             else:
                 query.append({"role": "user", "content": o})
             query.append({"role": "assistant", "content": a})
-        if len(query) == 0:
+        if not query:
             query.append(
                 {
                     "role": "user",
-                    "content": f"Task: {sample['confirmed_task']}\nTrajectory:\n"
-                    + "obs: `"
-                    + obs
-                    + "`",
+                    "content": f"Task: {sample['confirmed_task']}\nTrajectory:\nobs: `{obs}`",
                 }
             )
         else:
-            query.append({"role": "user", "content": "obs: `" + obs + "`"})
-        prev_obs.append("obs: `" + target_obs + "`")
-        prev_actions.append("act: `" + target_act + "` (" + act_repr + ")")
+            query.append({"role": "user", "content": f"obs: `{obs}`"})
+        prev_obs.append(f"obs: `{target_obs}`")
+        prev_actions.append(f"act: `{target_act}` ({act_repr})")
 
         model = args.model
         total_num_tokens = num_tokens_from_messages(sys_message + query, model)
@@ -118,20 +114,20 @@ def eval_traj_sample(task_id, args, sample):
             model = "gpt-3.5-turbo-16k-0613"
             logger.info(f"Using {model} due to context limit")
             total_num_tokens = num_tokens_from_messages(sys_message + query, model)
-            if total_num_tokens > MAX_TOKENS[model]:
-                logger.info(
-                    f"Too many tokens in acting ({total_num_tokens} / {MAX_TOKENS[model]}), skipping..."
-                )
-                element_acc.append(0)
-                action_f1.append(0)
-                step_success.append(0)
-                conversation.append(
-                    {
-                        "input": sys_message + query,
-                        "output": f"FAILED DUE TO THE CONTEXT LIMIT: {total_num_tokens}",
-                    }
-                )
-                continue
+        if total_num_tokens > MAX_TOKENS[model]:
+            logger.info(
+                f"Too many tokens in acting ({total_num_tokens} / {MAX_TOKENS[model]}), skipping..."
+            )
+            element_acc.append(0)
+            action_f1.append(0)
+            step_success.append(0)
+            conversation.append(
+                {
+                    "input": sys_message + query,
+                    "output": f"FAILED DUE TO THE CONTEXT LIMIT: {total_num_tokens}",
+                }
+            )
+            continue
 
         demo_message = []
         for e_id, e in enumerate(exemplars):
@@ -206,7 +202,7 @@ def eval_traj_sample(task_id, args, sample):
         }
     )
     log_dir = Path(
-        f"{args.log_dir}/{args.model}/{args.benchmark}{f'/no_mem' if args.no_memory else ''}{f'_no_traj' if args.no_trajectory else ''}"
+        f"{args.log_dir}/{args.model}/{args.benchmark}{'/no_mem' if args.no_memory else ''}{'_no_traj' if args.no_trajectory else ''}"
     )
     log_dir.mkdir(parents=True, exist_ok=True)
     with open(os.path.join(log_dir, f"{task_id}.json"), "w") as f:

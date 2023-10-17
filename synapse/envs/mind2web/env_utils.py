@@ -45,9 +45,7 @@ def get_target_act(example, target_element_id):
 def parse_act_str(act_str):
     # Compile the regular expression pattern
     pattern = re.compile(r"(?:^|\s)(CLICK|SELECT|TYPE)?\s?\[(.+?)\](?:\s\[(.+?)\])?")
-    # Search for the pattern in the string
-    match = pattern.search(act_str)
-    if match:
+    if match := pattern.search(act_str):
         # Extract the matching groups
         action_op = match.group(1)  # This will be None if not in the list
         target_element_id = match.group(2)
@@ -59,12 +57,8 @@ def parse_act_str(act_str):
 
 def construct_act_str(op, val):
     if op is None:
-        if val is None:
-            return " "
-        return " " + val
-    if op == "CLICK" or val is None:
-        return op + " "
-    return f"{op} {val}"
+        return " " if val is None else f" {val}"
+    return f"{op} " if op == "CLICK" or val is None else f"{op} {val}"
 
 
 def get_target_obs_and_act(example):
@@ -108,13 +102,11 @@ def get_target_obs_and_act(example):
                 break
         # Extract the target element
         o = f"<html> {raw_obs[start_tag_idx:search_idx]} </html>"
-        a = get_target_act(example, element_id)
     else:
         dom_tree = etree.fromstring(example["cleaned_html"])
         element_id = example["pos_candidates"][0]["backend_node_id"]
         o = get_target_obs(dom_tree, [element_id])
-        a = get_target_act(example, element_id)
-
+    a = get_target_act(example, element_id)
     return o, a
 
 
@@ -122,11 +114,11 @@ def calculate_f1(pred, label):
     pred = set(pred.strip().split())
     label = set(label.strip().split())
     # remove punctuation
-    pred = set([x for x in pred if x not in string.punctuation])
-    label = set([x for x in label if x not in string.punctuation])
-    if len(pred) == 0 and len(label) == 0:
+    pred = {x for x in pred if x not in string.punctuation}
+    label = {x for x in label if x not in string.punctuation}
+    if not pred and not label:
         return 1
-    if len(pred) == 0 or len(label) == 0:
+    if not pred or not label:
         return 0
 
     tp = len(pred & label)
@@ -136,8 +128,7 @@ def calculate_f1(pred, label):
     recall = tp / (tp + fn)
     if precision == 0 or recall == 0:
         return 0
-    f1 = 2 * precision * recall / (precision + recall)
-    return f1
+    return 2 * precision * recall / (precision + recall)
 
 
 def get_descendants(node, max_depth, current_depth=0):
@@ -189,7 +180,7 @@ def get_attribute_repr(node, max_value_length=5, max_length=20):
             value = " ".join([v for v in value if len(v) < 15][:max_value_length])
             if value and value not in attr_values_set:
                 attr_values_set.add(value)
-                attr_values += value + " "
+                attr_values += f"{value} "
     uid = node.attrib.get("backend_node_id", "")
     # clear all attributes
     node.attrib.clear()
@@ -261,7 +252,7 @@ def prune_tree(
                 node.attrib.pop("backend_node_id", None)
             if (
                 len(node.attrib) == 0
-                and not any([x.tag == "text" for x in node.getchildren()])
+                and all(x.tag != "text" for x in node.getchildren())
                 and node.getparent() is not None
                 and node.tag != "text"
                 and len(node.getchildren()) <= 1
@@ -276,10 +267,7 @@ def prune_tree(
 def get_tree_repr(
     tree, max_value_length=5, max_length=20, id_mapping={}, keep_html_brackets=False
 ):
-    if isinstance(tree, str):
-        tree = etree.fromstring(tree)
-    else:
-        tree = copy.deepcopy(tree)
+    tree = etree.fromstring(tree) if isinstance(tree, str) else copy.deepcopy(tree)
     for node in tree.xpath("//*"):
         if node.tag != "text":
             if "backend_node_id" in node.attrib:

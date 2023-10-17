@@ -63,7 +63,7 @@ MAX_TOKENS = {
 def get_mode(model: str) -> str:
     """Check if the model is a chat model."""
 
-    if model in [
+    if model in {
         "gpt-3.5-turbo-0301",
         "gpt-3.5-turbo-0613",
         "gpt-3.5-turbo-16k-0613",
@@ -71,12 +71,9 @@ def get_mode(model: str) -> str:
         "gpt-4-32k-0314",
         "gpt-4-0613",
         "gpt-4-32k-0613",
-    ]:
+    }:
         return "chat"
-    elif model in [
-        "davinci-002",
-        "gpt-3.5-turbo-instruct-0914",
-    ]:
+    elif model in {"davinci-002", "gpt-3.5-turbo-instruct-0914"}:
         return "completion"
     else:
         raise ValueError(f"Unknown model: {model}")
@@ -132,12 +129,8 @@ def extract_from_response(response: str, backtick="```") -> str:
         pattern = r"`(.*?)`"
     else:
         raise ValueError(f"Unknown backtick: {backtick}")
-    match = re.search(
-        pattern, response, re.DOTALL
-    )  # re.DOTALL makes . match also newlines
-    if match:
-        extracted_string = match.group(1)
-    else:
-        extracted_string = ""
-
-    return extracted_string
+    return (
+        match.group(1)
+        if (match := re.search(pattern, response, re.DOTALL))
+        else ""
+    )
