@@ -52,7 +52,7 @@ def main():
                 logger.info(f"Actions:\n{actions}")
                 exec(actions)
             except:
-                logger.info(f"Failed to execute action. Try again.")
+                logger.info("Failed to execute action. Try again.")
             if agent.done:
                 break
         agent.log_results()

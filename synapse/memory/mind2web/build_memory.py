@@ -71,11 +71,7 @@ def get_specifiers_from_sample(sample: dict) -> str:
     domain = sample["domain"]
     subdomain = sample["subdomain"]
     goal = sample["confirmed_task"]
-    specifier = (
-        f"Website: {website}\nDomain: {domain}\nSubdomain: {subdomain}\nTask: {goal}"
-    )
-
-    return specifier
+    return f"Website: {website}\nDomain: {domain}\nSubdomain: {subdomain}\nTask: {goal}"
 
 
 def build_memory(memory_path: str, data_dir: str):
@@ -105,17 +101,21 @@ def build_memory(memory_path: str, data_dir: str):
             _, target_act = get_target_obs_and_act(s)
             target_obs, _ = get_top_k_obs(s, top_k)
 
-            if len(prev_obs) > 0:
-                prev_obs.append("obs: `" + target_obs + "`")
+            if prev_obs:
+                prev_obs.append(f"obs: `{target_obs}`")
             else:
                 query = f"Task: {sample['confirmed_task']}\nTrajectory:\n"
-                prev_obs.append(query + "obs: `" + target_obs + "`")
-            prev_actions.append("act: `" + target_act + "` (" + act_repr + ")")
+                prev_obs.append(f"{query}obs: `{target_obs}`")
+            prev_actions.append(f"act: `{target_act}` ({act_repr})")
 
         message = []
         for o, a in zip(prev_obs, prev_actions):
-            message.append({"role": "user", "content": o})
-            message.append({"role": "user", "content": a})
+            message.extend(
+                (
+                    {"role": "user", "content": o},
+                    {"role": "user", "content": a},
+                )
+            )
         exemplars.append(message)
 
     with open(os.path.join(memory_path, "exemplars.json"), "w") as f:
@@ -148,6 +148,4 @@ def retrieve_exemplar_name(memory, query: str, top_k) -> list[str]:
 
 def load_memory(memory_path):
     embedding = OpenAIEmbeddings(model="text-embedding-ada-002")
-    memory = FAISS.load_local(memory_path, embedding)
-
-    return memory
+    return FAISS.load_local(memory_path, embedding)

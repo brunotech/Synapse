@@ -91,13 +91,13 @@ class Agent:
             else:
                 exemplar_name = self.args.env_name
         else:
-            query = "Task: " + self.task + "\nState:\n" + self.state
+            query = f"Task: {self.task}" + "\nState:\n" + self.state
             exemplar_name = retrieve_exemplar_name(self.memory, query, 3)
 
         self.log_path = Path(
             os.path.join(
                 self.args.log_dir,
-                f"{self.args.model}/{self.args.env_name}/{f'no_filt_' if self.args.no_filter and self.args.env_name in ENV_TO_FILTER else ''}{f'no_mem_' if self.args.no_memory else ''}seed_{seed}{'' if exemplar_name == self.args.env_name else f'_{exemplar_name}'}.json",
+                f"{self.args.model}/{self.args.env_name}/{'no_filt_' if self.args.no_filter and self.args.env_name in ENV_TO_FILTER else ''}{'no_mem_' if self.args.no_memory else ''}seed_{seed}{'' if exemplar_name == self.args.env_name else f'_{exemplar_name}'}.json",
             )
         )
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -106,20 +106,16 @@ class Agent:
             self.prompts = json.load(rf)[exemplar_name]
         demo = self.prompts["demo"]
         if self.args.no_filter:
-            if "trajectory" not in demo[0]:
-                self.prompt_type = "state_act"
-                assert self.args.env_name != "click-pie"  # context limit
-            else:
+            if "trajectory" in demo[0]:
                 self.prompt_type = "multi_state_act"
                 assert self.args.env_name != "book-flight"  # context limit
-        else:
-            if "trajectory" not in demo[0]:
-                if "obs" in demo[0]:
-                    self.prompt_type = "obs_act"
-                else:  # obs not available due to exemplar mismatch
-                    self.prompt_type = "state_act"
             else:
-                self.prompt_type = "multi_obs_act"
+                self.prompt_type = "state_act"
+                assert self.args.env_name != "click-pie"  # context limit
+        elif "trajectory" not in demo[0]:
+            self.prompt_type = "obs_act" if "obs" in demo[0] else "state_act"
+        else:
+            self.prompt_type = "multi_obs_act"
 
         self.demo_traj = []
         if self.prompt_type == "state_act" and "ablation_act_prompt" in self.prompts:
@@ -127,24 +123,28 @@ class Agent:
                 {"role": "user", "content": self.prompts["ablation_act_prompt"]}
             )
         for d in demo:
-            if self.prompt_type == "state_act":
-                if "state" in d:  # fewer states due to context limit
+            if self.prompt_type == "multi_obs_act":
+                self.demo_traj.append(
+                    {"role": "user", "content": "Task: " + d["task"] + "\nTrajectory:"}
+                )
+                for t in d["trajectory"]:
                     self.demo_traj.append(
                         {
                             "role": "user",
-                            "content": "Observation:\n" + d["state"] + "\nAction:",
+                            "content": "Observation:\n" + t["obs"] + "\nAction:",
                         }
                     )
                     self.demo_traj.append(
-                        {"role": "assistant", "content": "```\n" + d["act"] + "\n```"}
+                        {"role": "assistant", "content": "```\n" + t["act"] + "\n```"}
                     )
+
             elif self.prompt_type == "multi_state_act":
                 if exemplar_name in [
                     "login-user-popup",
                     "terminal",
                     "use-autocomplete",
                 ]:  # context limit
-                    if len(self.demo_traj) > 0:
+                    if self.demo_traj:
                         break
                 if all(
                     "state" in t for t in d["trajectory"]
@@ -178,19 +178,16 @@ class Agent:
                 self.demo_traj.append(
                     {"role": "assistant", "content": "```\n" + d["act"] + "\n```"}
                 )
-            elif self.prompt_type == "multi_obs_act":
-                self.demo_traj.append(
-                    {"role": "user", "content": "Task: " + d["task"] + "\nTrajectory:"}
-                )
-                for t in d["trajectory"]:
+            elif self.prompt_type == "state_act":
+                if "state" in d:  # fewer states due to context limit
                     self.demo_traj.append(
                         {
                             "role": "user",
-                            "content": "Observation:\n" + t["obs"] + "\nAction:",
+                            "content": "Observation:\n" + d["state"] + "\nAction:",
                         }
                     )
                     self.demo_traj.append(
-                        {"role": "assistant", "content": "```\n" + t["act"] + "\n```"}
+                        {"role": "assistant", "content": "```\n" + d["act"] + "\n```"}
                     )
 
     def filter(self) -> str:
@@ -199,14 +196,14 @@ class Agent:
             obs = self.state
         else:
             filter_with_code = False
+            filter_demo = ""  # create filter demo for possible LLM filtering in case code filtering fails
             if self.prompt_type == "obs_act":
+                for d in demo:
+                    if "state" in d:
+                        filter_demo += "State:\n" + d["state"] + "\n"
+                        filter_demo += "Observation:\n" + d["obs"] + "\n\n"
                 if "code_filter_prompt" in self.prompts:
                     filter_with_code = True
-                    filter_demo = ""  # create filter demo for possible LLM filtering in case code filtering fails
-                    for d in demo:
-                        if "state" in d:
-                            filter_demo += "State:\n" + d["state"] + "\n"
-                            filter_demo += "Observation:\n" + d["obs"] + "\n\n"
                     query = (
                         self.prompts["code_filter_prompt"]
                         .replace("<task>", self.task)
@@ -216,54 +213,32 @@ class Agent:
                     "filter_prompt" in self.prompts
                 ):  # filter state into obs with specific prompts
                     query = self.prompts["filter_prompt"]
-                    filter_demo = ""
-                    for d in demo:
-                        if "state" in d:
-                            filter_demo += "State:\n" + d["state"] + "\n"
-                            filter_demo += "Observation:\n" + d["obs"] + "\n\n"
                     query += filter_demo + "State:\n" + self.state + "\nObservation:"
                 else:  # filter state into obs
-                    filter_demo = ""
-                    for d in demo:
-                        if "state" in d:
-                            filter_demo += "State:\n" + d["state"] + "\n"
-                            filter_demo += "Observation:\n" + d["obs"] + "\n\n"
                     query = filter_demo + "State:\n" + self.state + "\nObservation:"
             else:
                 cur_step = len(self.trajectory)
+                for d in demo:
+                    if "state" in d["trajectory"][cur_step]:
+                        filter_demo += (
+                            "State:\n" + d["trajectory"][cur_step]["state"] + "\n"
+                        )
+                        filter_demo += (
+                            "Observation:\n"
+                            + d["trajectory"][cur_step]["obs"]
+                            + "\n\n"
+                        )
                 if (
                     "code_filter_prompt" in self.prompts
                     and len(self.prompts["code_filter_prompt"][cur_step]) > 0
                 ):
                     filter_with_code = True
-                    filter_demo = ""  # create filter demo for possible LLM filtering in case code filtering fails
-                    for d in demo:
-                        if "state" in d["trajectory"][cur_step]:
-                            filter_demo += (
-                                "State:\n" + d["trajectory"][cur_step]["state"] + "\n"
-                            )
-                            filter_demo += (
-                                "Observation:\n"
-                                + d["trajectory"][cur_step]["obs"]
-                                + "\n\n"
-                            )
                     query = (
                         self.prompts["code_filter_prompt"][cur_step]
                         .replace("<task>", self.task)
                         .replace("<state>", self.state)
                     )
                 else:
-                    filter_demo = ""
-                    for d in demo:
-                        if "state" in d["trajectory"][cur_step]:
-                            filter_demo += (
-                                "State:\n" + d["trajectory"][cur_step]["state"] + "\n"
-                            )
-                            filter_demo += (
-                                "Observation:\n"
-                                + d["trajectory"][cur_step]["obs"]
-                                + "\n\n"
-                            )
                     query = filter_demo + "State:\n" + self.state + "\nObservation:"
 
             message = [{"role": "user", "content": query}]
@@ -336,7 +311,7 @@ class Agent:
         query_message = copy.deepcopy(self.demo_traj)
         if self.prompt_type in ["multi_state_act", "multi_obs_act"]:
             query_message.append(
-                {"role": "user", "content": "Task: " + self.task + "\nTrajectory:"}
+                {"role": "user", "content": f"Task: {self.task}" + "\nTrajectory:"}
             )
             for t in self.trajectory:
                 query_message.append(
@@ -422,7 +397,7 @@ class Agent:
             action = MiniWoBType(Keys.UP)
         elif key_type == "arrowdown":
             action = MiniWoBType(Keys.DOWN)
-        elif key_type in ["command+a", "command+c", "command+v"]:
+        elif key_type in {"command+a", "command+c", "command+v"}:
             action = MiniWoBType(key_type)
         else:
             raise ValueError("Invalid instruction")

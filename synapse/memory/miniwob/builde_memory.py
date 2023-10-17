@@ -91,13 +91,9 @@ def retrieve_exemplar_name(memory, query: str, top_k) -> str:
     retrieved_exemplar_names = [doc.metadata["name"] for doc in docs]
     logger.info(f"Retrieved exemplars: {retrieved_exemplar_names}")
     data = Counter(retrieved_exemplar_names)
-    retrieved_exemplar_name = data.most_common(1)[0][0]
-
-    return retrieved_exemplar_name
+    return data.most_common(1)[0][0]
 
 
 def load_memory(memory_path):
     embedding = OpenAIEmbeddings(model="text-embedding-ada-002")
-    memory = FAISS.load_local(memory_path, embedding)
-
-    return memory
+    return FAISS.load_local(memory_path, embedding)
